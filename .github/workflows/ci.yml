@@ -10,8 +10,8 @@ jobs:
       matrix:
         python: ["3.10", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
       - run: python -m unittest discover -s tests -t . -v
@@ -23,14 +23,20 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build
         run: docker build -t coche .
       - name: Smoke test
         run: |
-          docker run -d --name c -p 8043:8043 coche
+          docker run -d --name coche-smoke -p 8043:8043 coche
           for i in $(seq 1 20); do curl -fs http://127.0.0.1:8043/healthz && break; sleep 1; done
           curl -fs http://127.0.0.1:8043/api/v1/projects | grep -q Inbox
+          curl -fs -H "Content-Type: application/json" -d '{"text":"Smoke test tomorrow 9am p1"}' \
+            http://127.0.0.1:8043/api/v1/tasks/quick | grep -q '"priority":4'
+          curl -fs http://127.0.0.1:8043/today | grep -q "<html"
+      - name: Container logs
+        if: always()
+        run: docker logs coche-smoke || true
       - name: Publish to GHCR (main branch only)
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
