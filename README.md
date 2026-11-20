@@ -14,7 +14,8 @@ Natural-language Quick Add · recurring tasks · projects, sections & subtasks �
 ![Python](https://img.shields.io/badge/python-3.10%2B-3776ab?logo=python&logoColor=white)
 ![Dependencies](https://img.shields.io/badge/dependencies-0-success)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Docker](https://img.shields.io/badge/docker-ready-2496ed?logo=docker&logoColor=white)
+![Docker](https://img.shields.io/badge/docker-ghcr.io-2496ed?logo=docker&logoColor=white)
+[![CI](https://github.com/mathyouadr/coche/actions/workflows/ci.yml/badge.svg)](https://github.com/mathyouadr/coche/actions/workflows/ci.yml)
 
 <img src="docs/screenshots/desktop-dark.png" alt="Coche on desktop, dark theme" width="860">
 
@@ -57,6 +58,14 @@ docker compose up -d
 ```
 
 Open **http://your-server:8043**, sign in, and press **Q** to add your first task.
+
+No need to clone anything if you just want to try it, the image is published on GitHub's registry:
+
+```bash
+docker run -d --name coche -p 8043:8043 -v coche-data:/data \
+  -e COCHE_PASSWORD=pick-a-password -e COCHE_TZ=Europe/Paris \
+  ghcr.io/mathyouadr/coche:latest
+```
 
 Coche refuses to start while the password is still the example one, so nobody ends up with `change-me` on the internet. The [`docker-compose.yml`](docker-compose.yml) is ready to use: a named volume for your data, the `.env` file loaded automatically, a health check, and an optional [ntfy](https://ntfy.sh) service for push reminders (commented out). The image is tiny: `python:3.12-alpine` + Coche, running as a non-root user.
 

@@ -8,8 +8,8 @@
 #   docker compose exec -e TODOIST_API_TOKEN=xxxx coche python -m coche import-todoist
 services:
   coche:
-    build: .
-    # image: ghcr.io/mathyouadr/coche:latest   # use the published image instead of building
+    image: ghcr.io/mathyouadr/coche:latest   # published image (pulled first)
+    build: .                                  # fallback: built from this folder if the pull fails
     container_name: coche
     restart: unless-stopped
     ports:

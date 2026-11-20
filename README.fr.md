@@ -36,6 +36,14 @@ docker compose up -d
 
 Coche refuse de démarrer tant que le mot de passe est celui de l'exemple. Ouvre ensuite **http://ton-serveur:8043** et appuie sur **Q** pour ajouter ta première tâche. Le [`docker-compose.yml`](docker-compose.yml) est prêt à l'emploi : volume pour les données, `.env` chargé automatiquement, vérification de santé, et un service [ntfy](https://ntfy.sh) optionnel (commenté) pour les rappels sur téléphone.
 
+Pour juste essayer, sans rien cloner (image publiée sur le registre de GitHub) :
+
+```bash
+docker run -d --name coche -p 8043:8043 -v coche-data:/data \
+  -e COCHE_PASSWORD=ton-mot-de-passe -e COCHE_TZ=Europe/Paris -e COCHE_LANG=fr \
+  ghcr.io/mathyouadr/coche:latest
+```
+
 ### Sans Docker
 
 Il faut Python 3.10 ou plus (Linux, macOS ou Windows avec `py -m coche`).
