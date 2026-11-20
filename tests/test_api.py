@@ -186,6 +186,37 @@ class CocheApiTest(Base):
         self.store.mark_sent(due[0][0], due[0][2])
         self.assertEqual(self.store.due_reminders(), [])
 
+    def test_several_reminders(self):
+        """Several reminders on one task, each fires once; the automatic one stays unless switched off."""
+        self.store.set_settings({"auto_reminder": 15})
+        t = self.c.call("POST", "/api/v1/tasks/quick", {"text": "Partiel demain 10h !1j !2h !30min !2h"})[1]
+        rems = self.c.call("GET", f"/api/coche/reminders?task_id={t['id']}")[1]
+        self.assertEqual(sorted(r["minute_offset"] for r in rems), [30, 120, 1440])          # !2h only once
+        self.c.call("POST", "/api/coche/reminders", {"task_id": t["id"], "at": "2026-11-20T20:00"})
+        self.assertEqual(len(self.c.call("GET", f"/api/coche/reminders?task_id={t['id']}")[1]), 4)
+
+        def firing(at):
+            old = self.store.clock
+            self.store.clock = lambda: at
+            try:
+                out = self.store.due_reminders()
+                for rem, task, key in out:
+                    self.store.mark_sent(rem, key)
+                return sorted(str(rem.get("minute_offset", "auto")) if not str(rem["id"]).startswith("auto-") else "auto"
+                              for rem, task, key in out)
+            finally:
+                self.store.clock = old
+        self.assertEqual(firing(dt.datetime(2026, 11, 20, 10, 0)), ["1440"])                 # the day before
+        self.assertEqual(firing(dt.datetime(2026, 11, 20, 20, 0)), ["None"])                 # fixed date & time
+        self.assertEqual(firing(dt.datetime(2026, 11, 21, 8, 0)), ["120"])
+        self.assertEqual(firing(dt.datetime(2026, 11, 21, 9, 30)), ["30"])
+        self.assertEqual(firing(dt.datetime(2026, 11, 21, 9, 45)), ["auto"])                 # automatic 15 min
+        self.assertEqual(firing(dt.datetime(2026, 11, 21, 9, 50)), [])                       # nothing twice
+        # switching the automatic one off for this task
+        t2 = self.c.call("POST", "/api/v1/tasks/quick", {"text": "Oral demain 11h"})[1]
+        self.c.call("POST", "/api/coche/reminders", {"task_id": t2["id"], "minutes_before": -1})
+        self.assertEqual(firing(dt.datetime(2026, 11, 21, 10, 45)), [])
+
     def test_ics_and_pages(self):
         self.c.call("POST", "/api/v1/tasks/quick", {"text": "Sport tous les lundis 18h"})
         st, body = self.c.call("GET", "/calendar.ics")

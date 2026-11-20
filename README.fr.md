@@ -77,7 +77,7 @@ TODOIST_API_TOKEN=xxxxxxxx python3 -m coche import-todoist
 | `Dentiste 12/03 9h30 !1h` | 12 mars 09:30, **rappel** une heure avant |
 | `Réunion jeudi 14h pendant 1h` | Avec une **durée** d'une heure |
 
-Repères : `#Projet` · `/Section` · `@étiquette` · `p1`…`p4` · `{échéance}` · `!30min` / `!2h` / `!14h` (rappel).
+Repères : `#Projet` · `/Section` · `@étiquette` · `p1`…`p4` · `{échéance}` · `!30min` / `!2h` / `!1j` / `!14h` (rappels, autant que tu veux : `Partiel vendredi 10h !1j !2h !30min`).
 Dates : aujourd'hui, demain, après-demain, lundi, lundi prochain, ce week-end, semaine prochaine, fin du mois, dans 3 jours, le 25, 25/12, 1er décembre, à midi, ce soir…
 Récurrences : tous les jours, tous les lundis, tous les lundis et jeudis, toutes les 2 semaines, tous les 5, tous les 25/12, tous les jours ouvrés.
 

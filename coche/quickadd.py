@@ -91,9 +91,10 @@ def parse(text: str, projects: list[str] = (), sections: list[str] = (), today: 
         if d and d.date:
             out.deadline = d.date
             mark("deadline", m.start(), m.end(), d.date.isoformat())
-    for m in re.finditer(r"(?<!\S)!(\d{1,3})\s?(min|m|h)(?!\w)", text, re.I):
-        n = int(m.group(1)) * (60 if m.group(2).lower() == "h" else 1)
-        out.reminders.append({"minutes_before": n})
+    for m in re.finditer(r"(?<!\S)!(\d{1,3})\s?(min|m|h|j|d)(?!\w)", text, re.I):
+        n = int(m.group(1)) * {"h": 60, "j": 1440, "d": 1440}.get(m.group(2).lower(), 1)
+        if {"minutes_before": n} not in out.reminders:
+            out.reminders.append({"minutes_before": n})
         mark("reminder", m.start(), m.end(), f"-{n}min")
     for m in re.finditer(r"(?<!\S)!(\d{1,2})(?:h(\d{2})?|:(\d{2}))(?!\w)", text):
         if any(s <= m.start() < e for s, e in cut):

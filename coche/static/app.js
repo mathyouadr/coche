@@ -197,7 +197,10 @@ function md(s) {
 
 /* ------------------------------------------------------------------ task rows */
 function countDeep(id) { let n = 0; for (const k of kids.get(id) || []) n += 1 + countDeep(k.id); return n; }
-const remOf = id => S.reminders.filter(r => r.item_id === id);
+const remOf = id => S.reminders.filter(r => r.item_id === id && r.minute_offset !== -1);
+const autoOn = x => S.settings.auto_reminder !== null && S.settings.auto_reminder !== undefined && !!dueTime(x)
+  && !S.reminders.some(r => r.item_id === x.id && (r.minute_offset === -1 || (r.minute_offset === S.settings.auto_reminder && !r.at && !r.time)));
+const remCount = x => remOf(x.id).length + (autoOn(x) ? 1 : 0);
 function taskHTML(x, ctx = {}) {
   const sub = ctx.nest ? (kids.get(x.id) || []) : [];
   const nsub = countDeep(x.id);
@@ -212,7 +215,7 @@ function taskHTML(x, ctx = {}) {
   if (!ctx.nest && nsub) meta.push(`<span>${ic("sub", "xs")}${nsub}</span>`);
   else if (ctx.nest && nsub && closedTwisty(x)) meta.push(`<span>${ic("sub", "xs")}${nsub}</span>`);
   if (x.note_count) meta.push(`<span>${ic("comment", "xs")}${x.note_count}</span>`);
-  if (remOf(x.id).length) meta.push(`<span>${ic("bell", "xs")}</span>`);
+  const nrem = remCount(x); if (nrem) meta.push(`<span title="${esc(plural(nrem, "{0} reminder", "{0} reminders"))}">${ic("bell", "xs")}${nrem > 1 ? nrem : ""}</span>`);
   for (const l of x.labels) { const L = S.labels.find(y => y.name === l); meta.push(`<span class="lab" style="color:${L && L.color !== "charcoal" ? col(L.color) : ""}">${ic("tag", "xs")}${esc(l)}</span>`); }
   if (ctx.showProject && proj) meta.push(`<span class="proj">${esc(projName(proj))}${sec ? " / " + esc(sec.name) : ""} <i class="dot" style="background:${col(proj.color)}"></i></span>`);
   const desc = x.description ? `<div class="desc">${esc(x.description.split("\n")[0])}</div>` : "";
@@ -663,11 +666,62 @@ function projectPicker(anchor, cur, cb) {
   inp.addEventListener("input", () => { $(".pl", el).innerHTML = list(inp.value.trim()); });
   el.addEventListener("click", e => { const b = e.target.closest("[data-p]"); if (b) { closePop(); cb({ project_id: b.dataset.p, section_id: b.dataset.s || null }); } });
 }
-function reminderPicker(anchor, x, cb) {
-  const opts = [[0, t("At the time of the task")], [10, t("{0} min before", 10)], [30, t("{0} min before", 30)], [60, t("1 hour before")], [120, t("2 hours before")], [1440, t("1 day before")]];
-  menu(anchor, [{ head: dueTime(x) ? t("Relative to {0}", hm(dueTime(x))) : t("Relative to {0}", hm(S.settings.reminder_time || "09:00")) },
-    ...opts.map(([m, l]) => ({ icon: ic("bell", "s"), label: l, run: () => cb({ minutes_before: m }) })), "-",
-    { icon: ic("clock", "s"), label: t("At a specific time…"), run: async () => { const r = await formBox(t("Reminder"), [{ name: "time", label: t("Time on the due day (HH:MM)"), value: "08:00", required: true }], t("Add")); if (r && /^\d{1,2}:\d{2}$/.test(r.time)) cb({ time: r.time.padStart(5, "0") }); } }]);
+/* Reminders: a panel that stays open, several at once. `ctx`:
+   { list(): current reminders [{minutes_before|minute_offset, time, at, id}], add(r), remove(r), due: {day, time} } */
+const REM_PRESETS = [0, 5, 15, 30, 60, 120, 180, 1440, 2880, 10080];
+function remLabel(r) {
+  const m = r.minutes_before ?? r.minute_offset;
+  if (r.at) return cap(wdShort(D(r.at))) + " " + dm(D(r.at)) + " " + hm(r.at.slice(11, 16));
+  if (r.time) return t("At {0} on the day", hm(r.time));
+  if (!m) return t("At the time of the task");
+  if (m % 10080 === 0) return plural(m / 10080, "{0} week before", "{0} weeks before");
+  if (m % 1440 === 0) return plural(m / 1440, "{0} day before", "{0} days before");
+  if (m % 60 === 0) return plural(m / 60, "{0} hour before", "{0} hours before");
+  return t("{0} min before", m);
+}
+function reminderPicker(anchor, ctx) {
+  const auto = S.settings.auto_reminder;
+  const offsetOf = r => r.minutes_before ?? r.minute_offset;
+  const paint = () => {
+    const list = ctx.list();
+    const has = m => list.some(r => !r.at && !r.time && offsetOf(r) === m);
+    const autoOff = has(-1);
+    const ref = ctx.due && ctx.due.time ? hm(ctx.due.time) : hm(S.settings.reminder_time || "09:00");
+    const fixed = list.filter(r => r.at || r.time);
+    const row = (m, label, on, extra = "") => `<button class="mi" data-m="${m}" ${extra}><span style="color:${on ? "var(--accent)" : "var(--fg-3)"}">${ic(on ? "done" : "bell", "s")}</span><span>${esc(label)}</span>${on ? `<span class="r">${ic("check", "s")}</span>` : ""}</button>`;
+    let h = `<div class="ph">${esc(t("Tap to add or remove · relative to {0}", ref))}</div>`;
+    if (auto !== null && auto !== undefined && ctx.due && ctx.due.time)
+      h += row("auto", t("Automatic: {0}", remLabel({ minutes_before: auto })), !autoOff) + `<div class="sep"></div>`;
+    h += REM_PRESETS.filter(m => !(auto !== null && auto !== undefined && ctx.due && ctx.due.time && m === auto)).map(m => row(m, remLabel({ minutes_before: m }), has(m))).join("");
+    if (fixed.length) h += `<div class="sep"></div>` + fixed.map(r => `<button class="mi" data-del="${esc(r.id || JSON.stringify(r))}"><span style="color:var(--accent)">${ic("clock", "s")}</span><span>${esc(remLabel(r))}</span><span class="r">${ic("x", "s")}</span></button>`).join("");
+    h += `<div class="sep"></div><div class="pad" style="display:grid;gap:8px">
+      <label class="hint" style="margin:0">${esc(t("At a time on the due day"))}</label>
+      <div style="display:flex;gap:6px"><input class="txt" type="time" id="rp-time" value="08:00"><button class="btn" data-add="time">${t("Add")}</button></div>
+      <label class="hint" style="margin:0">${esc(t("At a precise date and time"))}</label>
+      <div style="display:flex;gap:6px"><input class="txt" type="datetime-local" id="rp-at" value="${esc((ctx.due && ctx.due.day ? iso(addDays(D(ctx.due.day), -1)) : todayS()) + "T20:00")}"><button class="btn" data-add="at">${t("Add")}</button></div></div>`;
+    el.innerHTML = h;
+  };
+  const el = pop(anchor, "", { onclose: ctx.onclose });
+  el.style.minWidth = "280px";
+  paint();
+  const p = el.getBoundingClientRect(); if (p.bottom > innerHeight - 8) el.style.top = Math.max(8, innerHeight - p.height - 8) + "px";
+  el.addEventListener("click", run(async e => {
+    e.stopPropagation();
+    const list = ctx.list(), offsetOf2 = r => r.minutes_before ?? r.minute_offset;
+    const b = e.target.closest("[data-m]"), d = e.target.closest("[data-del]"), a = e.target.closest("[data-add]");
+    if (b) {
+      const m = b.dataset.m === "auto" ? -1 : +b.dataset.m;
+      const cur = list.find(r => !r.at && !r.time && offsetOf2(r) === m);
+      // the "auto" row is ON when no opt-out (-1) exists: clicking it adds or removes the opt-out
+      if (cur) await ctx.remove(cur); else await ctx.add({ minutes_before: m });
+    } else if (d) {
+      const cur = list.find(r => (r.id || JSON.stringify(r)) === d.dataset.del); if (cur) await ctx.remove(cur);
+    } else if (a) {
+      if (a.dataset.add === "time") { const v = $("#rp-time", el).value; if (v) await ctx.add({ time: v }); }
+      else { const v = $("#rp-at", el).value; if (v) await ctx.add({ at: v.slice(0, 16) }); }
+    } else return;
+    paint();
+  }));
 }
 
 /* ------------------------------------------------------------------ actions on tasks */
@@ -764,7 +818,7 @@ function renderQAChips() {
   const labels = [...new Set([...(P.labels || []), ...M.labels])];
   const p = qaProject(), sid = (P.section && P.section_id) || M.section_id, sec = secById.get(sid);
   const parent = M.parent_id && byId.get(M.parent_id);
-  const rem = (P.reminders || []).length + M.reminders.length;
+  const rem = (P.reminders || []).length + M.reminders.filter(r => (r.minutes_before ?? 0) !== -1).length;
   $("#qa-chips").innerHTML = `
     <button class="chip${due ? " set" : ""}" data-a="qa-date" style="${due ? "color:var(--due-today)" : ""}">${ic("cal", "s")}${esc(due ? due.label : t("Date"))}${due && !due.parsed ? `<span class="x" data-a="qa-nodate">${ic("x", "xs")}</span>` : ""}</button>
     ${P.deadline ? `<span class="chip set" style="color:var(--due-week)">${ic("target", "s")}${esc(dayLabel(P.deadline))}</span>` : ""}
@@ -868,7 +922,7 @@ function renderDetail() {
         <div class="prop"><span class="k">${ic("target", "s")}${t("Deadline")}</span><span class="v"><button class="val${x.deadline ? " dl" : " muted"}" data-a="d-deadline">${x.deadline ? esc(cap(wdShort(D(x.deadline.date))) + " " + dmy(D(x.deadline.date))) + (dayDiff(x.deadline.date) >= 0 ? ` <span class="muted" style="font-size:12.5px">· ${esc(t("in {0} d", dayDiff(x.deadline.date)))}</span>` : "") : t("Add")}</button>${x.deadline ? `<button class="ib" data-a="d-nodeadline" style="width:28px;height:28px">${ic("x", "xs")}</button>` : ""}</span></div>
         <div class="prop"><span class="k">${ic("flag", "s")}${t("Priority")}</span><span class="v"><button class="val" data-a="d-prio" style="color:var(--${PRIO[x.priority]})">${ic("flag", "s").replace("<path", '<path fill="' + (x.priority > 1 ? "currentColor" : "none") + '"')} P${5 - x.priority}</button></span></div>
         <div class="prop"><span class="k">${ic("tag", "s")}${t("Labels")}</span><span class="v">${x.labels.map(l => `<span class="tag">${esc(l)}</span>`).join("")}<button class="val muted" data-a="d-labels">${x.labels.length ? ic("edit", "xs") : t("Add")}</button></span></div>
-        <div class="prop"><span class="k">${ic("bell", "s")}${t("Reminders")}</span><span class="v">${rem.map(r => `<span class="tag">${esc(r.time ? hm(r.time) : r.at ? new Date(r.at).toLocaleString(locale(), { dateStyle: "short", timeStyle: "short" }) : r.minute_offset ? t("{0} min before", r.minute_offset) : t("On time"))}<button data-a="rem-del" data-id="${r.id}" style="display:grid">${ic("x", "xs")}</button></span>`).join("")}<button class="val muted" data-a="d-rem">${t("Add")}</button></span></div>
+        <div class="prop"><span class="k">${ic("bell", "s")}${t("Reminders")}</span><span class="v">${autoOn(x) ? `<span class="tag" title="${esc(t("Automatic reminder (Settings)"))}">${esc(remLabel({ minutes_before: S.settings.auto_reminder }))} · auto</span>` : ""}${rem.map(r => `<span class="tag">${esc(remLabel(r))}<button data-a="rem-del" data-id="${r.id}" style="display:grid">${ic("x", "xs")}</button></span>`).join("")}<button class="val muted" data-a="d-rem">${rem.length || autoOn(x) ? ic("plus", "xs") + " " + t("Add") : t("Add")}</button></span></div>
         <div class="prop"><span class="k">${ic("clock", "s")}${t("Duration")}</span><span class="v"><select id="d-duration" style="border:0;background:transparent;padding:4px 0">${[0, 15, 30, 45, 60, 90, 120, 180, 240].map(m => `<option value="${m}"${(x.duration ? x.duration.amount : 0) === m ? " selected" : ""}>${m ? fmtDur(m) : "—"}</option>`).join("")}${x.duration && ![15, 30, 45, 60, 90, 120, 180, 240].includes(x.duration.amount) ? `<option selected value="${x.duration.amount}">${fmtDur(x.duration.amount)}</option>` : ""}</select></span></div>
       </div>
       <div class="d-sec"><h4>${ic("sub", "s")}${t("Subtasks")} ${sub.length ? `<span class="muted">${sub.length}</span>` : ""}</h4>
@@ -931,7 +985,10 @@ const A = {
   "qa-nodate": (el, e) => { e.stopPropagation(); QA.manual.due = null; renderQAChips(); },
   "qa-prio": el => priorityPicker(el, QA.manual.priority || 1, p => { QA.manual.priority = p; renderQAChips(); $("#qa-input").focus(); }),
   "qa-labels": el => labelPicker(el, QA.manual.labels, ls => { QA.manual.labels = ls; renderQAChips(); }),
-  "qa-rem": el => reminderPicker(el, { due: QA.parsed && QA.parsed.due }, r => { QA.manual.reminders.push(r); renderQAChips(); }),
+  "qa-rem": el => { const P = QA.parsed || {}, due = P.due && P.due.date ? { day: P.due.date, time: P.due.time } : QA.manual.due && QA.manual.due.due_date ? { day: QA.manual.due.due_date, time: QA.manual.due.due_time } : null;
+    const key = r => JSON.stringify([r.minutes_before ?? r.minute_offset ?? null, r.time || null, r.at || null]);
+    reminderPicker(el, { due, list: () => QA.manual.reminders, onclose: renderQAChips,
+      add: r => { QA.manual.reminders.push(r); }, remove: r => { QA.manual.reminders = QA.manual.reminders.filter(x => key(x) !== key(r)); } }); },
   "qa-project": el => projectPicker(el, { project_id: qaProject().id, section_id: QA.manual.section_id }, d => { QA.manual.project_id = d.project_id; QA.manual.section_id = d.section_id; QA.manual.parent_id = null; renderQAChips(); $("#qa-input").focus(); }),
   "qa-submit": () => qaSubmit(), "qa-close": () => closeQuick(),
   "d-close": () => closeDetail(), "d-check": () => { const id = DETAIL; closeDetail(); complete(id, $(`.task[data-id="${id}"]`)); },
@@ -940,7 +997,11 @@ const A = {
   "d-deadline": el => { const id = DETAIL, x = byId.get(id); datePicker(el, x.deadline ? { date: x.deadline.date } : null, spec => { if (spec.due_string === "no date") return run(updateTask)(id, { deadline_date: null }); if (spec.due_date) return run(updateTask)(id, { deadline_date: spec.due_date }); run(async () => { const r = await api("POST", "/api/coche/parse", { text: spec.due_string }); if (r.due && r.due.date) await updateTask(id, { deadline_date: r.due.date }); })(); }); },
   "d-prio": el => priorityPicker(el, byId.get(DETAIL).priority, p => run(updateTask)(DETAIL, { priority: p })),
   "d-labels": el => { const id = DETAIL; labelPicker(el, byId.get(id).labels, ls => { const x = byId.get(id); if (x && ls.join() !== x.labels.join()) run(async () => { await updateTask(id, { labels: ls }); S.labels = (await api("GET", "/api/v1/labels?limit=200")).results; render(); })(); }); },
-  "d-rem": el => { const id = DETAIL; reminderPicker(el, byId.get(id), run(async r => { S.reminders.push(await api("POST", "/api/coche/reminders", { task_id: id, ...r })); renderDetail(); renderView(); })); },
+  "d-rem": el => { const id = DETAIL, x = byId.get(id);
+    reminderPicker(el, { due: dueDay(x) ? { day: dueDay(x), time: dueTime(x) } : null, onclose: () => { if (DETAIL === id) renderDetail(); renderView(); },
+      list: () => S.reminders.filter(r => r.item_id === id),
+      add: async r => { const n = await api("POST", "/api/coche/reminders", { task_id: id, ...r }); if (!S.reminders.some(y => y.id === n.id)) S.reminders.push(n); },
+      remove: async r => { await api("DELETE", `/api/coche/reminders/${r.id}`); S.reminders = S.reminders.filter(y => y.id !== r.id); } }); },
   "rem-del": run(async el => { await api("DELETE", `/api/coche/reminders/${el.dataset.id}`); S.reminders = S.reminders.filter(r => r.id !== el.dataset.id); renderDetail(); renderView(); }),
   "d-move": el => { const x = byId.get(DETAIL); projectPicker(el, x, run(async d => { put(await api("POST", `/api/v1/tasks/${x.id}/move`, d.section_id ? { section_id: d.section_id } : { project_id: d.project_id })); await load(true); })); },
   "d-more": el => taskMenu(el, DETAIL),

@@ -782,7 +782,7 @@ class Store:
     # ------------------------------------------------------------------ reminders
     def reminder_out(self, r):
         return {"id": r["id"], "item_id": r["item_id"], "task_id": r["item_id"],
-                "type": "absolute" if (r["at"] or r["at_time"]) else "relative",
+                "type": "absolute" if (r["at"] or r["at_time"]) else "auto_off" if r["minute_offset"] == -1 else "relative",
                 "minute_offset": r["minute_offset"], "time": r["at_time"], "at": r["at"], "is_auto": bool(r["is_auto"])}
 
     def reminders(self, task_id=None):
@@ -803,6 +803,12 @@ class Store:
             at = dt.datetime.fromisoformat(raw.replace("Z", "+00:00")).replace(tzinfo=None).isoformat(timespec="minutes")
         if mins is None and not at_time and not at:
             mins = 0
+        if mins is not None and (int(mins) < -1 or int(mins) > 60 * 24 * 60):
+            raise Invalid("minutes_before must be between 0 and 86400")
+        dup = self.q1("SELECT * FROM reminders WHERE item_id=? AND IFNULL(minute_offset,-99)=? AND IFNULL(at_time,'')=?"
+                      " AND IFNULL(at,'')=?", (tid, int(mins) if mins is not None else -99, at_time or "", at or ""))
+        if dup:
+            return self.reminder_out(dup)
         self.x("INSERT INTO reminders(id,item_id,minute_offset,at_time,at,is_auto) VALUES(?,?,?,?,?,?)",
                (rid, tid, int(mins) if mins is not None else None, at_time, at, int(bool(d.get("is_auto")))))
         return self.reminder_out(self.q1("SELECT * FROM reminders WHERE id=?", (rid,)))
@@ -821,10 +827,13 @@ class Store:
         rows = self.q("SELECT r.*, t.due_date, t.due_time FROM reminders r JOIN tasks t ON t.id = r.item_id"
                       " WHERE t.checked=0 AND t.is_deleted=0")
         auto = s.get("auto_reminder")
-        candidates = [(dict(r), r["at"], r["at_time"], r["minute_offset"]) for r in rows]
+        candidates = [(dict(r), r["at"], r["at_time"], r["minute_offset"]) for r in rows if r["minute_offset"] != -1]
         if auto is not None:
+            # additive: a task keeps its automatic reminder next to the ones added by hand, unless it was
+            # switched off for this task (a row with minute_offset -1) or one already fires at that minute
             for r in self.q("SELECT id, due_date, due_time FROM tasks WHERE checked=0 AND is_deleted=0 AND due_time"
-                            " IS NOT NULL AND id NOT IN (SELECT item_id FROM reminders)"):
+                            " IS NOT NULL AND id NOT IN (SELECT item_id FROM reminders WHERE minute_offset=-1"
+                            " OR (minute_offset=? AND at IS NULL AND at_time IS NULL))", (int(auto),)):
                 fake = {"id": "auto-" + r["id"], "item_id": r["id"], "due_date": r["due_date"],
                         "due_time": r["due_time"], "sent_key": self._auto_sent(r["id"])}
                 candidates.append((fake, None, None, int(auto)))

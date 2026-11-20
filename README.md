@@ -134,7 +134,7 @@ Type naturally. Coche highlights each part it understood while you type.
 | `Meeting thursday 2pm for 1h` | With a **duration** of 1 hour |
 | `Book flights in 2 weeks` | Two weeks from today |
 
-**Markers:** `#Project` · `/Section` · `@label` (created on the fly) · `p1`…`p4` · `{deadline}` · `!30min` / `!2h` / `!14:00` (reminder).
+**Markers:** `#Project` · `/Section` · `@label` (created on the fly) · `p1`…`p4` · `{deadline}` · `!30min` / `!2h` / `!1d` / `!14:00` (reminders, as many as you want).
 
 **Dates:** today, tomorrow, monday… · next week, this weekend, next month, end of month · in 3 days / 2 weeks / 2 hours · 25/12, 25 dec, Dec 25th, 2027-01-15, the 5th · times like 14h, 14:30, 2pm, at noon · and the French equivalents: *aujourd'hui, demain, lundi prochain, ce week-end, dans 3 jours, le 25, 1er décembre, à midi, ce soir…*
 
@@ -156,7 +156,7 @@ no date                      search: invoice          recurring & !#Home
 
 ## ⏰ Reminders
 
-Add reminders from Quick Add (`!30min`) or from a task's detail panel: relative ("30 min before") or at a fixed time. You can also turn on an automatic reminder for every timed task (Settings › Reminders). Coche needs a channel to reach your phone. Pick one or combine them:
+A task can have **as many reminders as you like**: from Quick Add (`Exam friday 10am !1d !2h !30min`) or from the task panel, where you tick several at once (from "at the time of the task" to "1 week before"), add a time on the due day, or a precise date and time ("the evening before at 8pm"). You can also turn on an automatic reminder for every timed task (Settings › Reminders); it adds to the ones you set and can be switched off per task. Coche needs a channel to reach your phone. Pick one or combine them:
 
 | Channel | Setup |
 |---|---|
