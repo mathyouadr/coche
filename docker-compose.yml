@@ -1,0 +1,38 @@
+# Coche - ready-made Docker Compose setup.
+#
+#   1. cp .env.example .env    (set at least COCHE_PASSWORD)
+#   2. docker compose up -d
+#   3. open http://<your-server>:8043
+#
+# Move from Todoist:  Settings > Import from Todoist   (or)
+#   docker compose exec -e TODOIST_API_TOKEN=xxxx coche python -m coche import-todoist
+services:
+  coche:
+    build: .
+    # image: ghcr.io/mathyouadr/coche:latest   # use the published image instead of building
+    container_name: coche
+    restart: unless-stopped
+    ports:
+      - "8043:8043"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      COCHE_DATA_DIR: /data
+      TZ: ${COCHE_TZ:-Europe/Paris}
+    volumes:
+      - coche-data:/data              # your tasks (a single SQLite file: coche.db)
+      # Prefer a plain folder? Replace the line above with ./data:/data, then: mkdir data && sudo chown 1000:1000 data
+      # - ./config:/config:ro         # files for COCHE_EXTRA_HEAD=@/config/head.html
+
+  # Optional: your own push-notification server for reminders (phone app "ntfy").
+  # Then set COCHE_NTFY_URL=http://ntfy/coche-<random> in .env
+  # ntfy:
+  #   image: binwiederhier/ntfy
+  #   command: serve
+  #   restart: unless-stopped
+  #   ports:
+  #     - "8044:80"
+
+volumes:
+  coche-data:

@@ -1,0 +1,16 @@
+# systemd user service:  cp deploy/coche.service ~/.config/systemd/user/
+#                        systemctl --user enable --now coche
+#                        loginctl enable-linger $USER   (keep it running after logout)
+[Unit]
+Description=Coche - self-hosted tasks
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/coche
+EnvironmentFile=-%h/coche/.env
+ExecStart=/usr/bin/python3 -m coche serve
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

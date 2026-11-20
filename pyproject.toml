@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coche"
+dynamic = ["version"]
+description = "A self-hosted, open-source Todoist alternative: natural-language quick add, recurring tasks, projects, labels, filters, reminders, Todoist-compatible API. Zero dependencies."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Mathyou André" }]
+requires-python = ">=3.10"
+keywords = ["todo", "tasks", "todoist", "self-hosted", "pwa", "gtd", "productivity"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Environment :: Web Environment",
+  "Topic :: Office/Business :: Scheduling",
+]
+dependencies = []
+
+[project.scripts]
+coche = "coche.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/mathyouadr/coche"
+
+[tool.setuptools]
+packages = ["coche"]
+
+[tool.setuptools.dynamic]
+version = { attr = "coche.__version__" }
+
+[tool.setuptools.package-data]
+coche = ["static/*"]

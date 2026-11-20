@@ -1,0 +1,9 @@
+.git
+.github
+docs
+tests
+deploy
+data
+.env
+**/__pycache__
+*.db*

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>{{TITLE}}</title>
+<link rel="icon" href="{{BASE}}/static/icon.svg?v={{VERSION}}" type="image/svg+xml">
+<link rel="stylesheet" href="{{BASE}}/static/app.css?v={{VERSION}}">
+<script>document.documentElement.dataset.theme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";</script>
+<!--EXTRA_HEAD-->
+<style>
+  body { display: grid; place-items: center; min-height: 100%; overflow: auto; padding: 20px; }
+  .box { width: min(360px, 100%); text-align: center; }
+  .logo { width: 56px; height: 56px; border-radius: 16px; background: var(--accent); color: var(--accent-fg); display: grid;
+    place-items: center; margin: 0 auto 14px; }
+  h1 { font: 800 24px var(--display); margin: 0 0 4px; }
+  p { color: var(--fg-2); margin: 0 0 22px; font-size: 14px; }
+  .form { text-align: left; }
+  .err { color: var(--due-over); font-size: 13.5px; min-height: 20px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="box">
+  <div class="logo"><svg class="i" viewBox="0 0 24 24" style="width:30px;height:30px;stroke-width:3"><path d="M20 6 9 17l-5-5"/></svg></div>
+  <h1>{{TITLE}}</h1>
+  <p id="sub">Sign in to your tasks</p>
+  <form class="form" id="f">
+    <label><span id="lbl">Password</span><input type="password" id="pw" autocomplete="current-password" required autofocus></label>
+    <button class="btn primary" style="width:100%;margin-top:4px" id="go">Sign in</button>
+    <div class="err" id="err"></div>
+  </form>
+</div>
+<script>
+const BASE = {{BOOT}}.base || "";
+if ((navigator.language || "").startsWith("fr")) { sub.textContent = "Connecte-toi à tes tâches"; lbl.textContent = "Mot de passe"; go.textContent = "Se connecter"; }
+f.addEventListener("submit", async e => {
+  e.preventDefault(); err.textContent = ""; go.disabled = true;
+  try {
+    const r = await fetch(BASE + "/api/coche/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: pw.value }) });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok) { location.href = BASE + "/today"; return; }
+    err.textContent = d.error || ("HTTP " + r.status); pw.select();
+  } catch (x) { err.textContent = String(x); }
+  go.disabled = false;
+});
+</script>
+<!--EXTRA_BODY-->
+</body>
+</html>
