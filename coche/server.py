@@ -6,6 +6,8 @@ import gzip
 import hashlib
 import hmac
 import html
+import ipaddress
+import os
 import json
 import logging
 import mimetypes
@@ -58,7 +60,8 @@ class App:
         self.api = API(self.store, self)
         self.notifier = Notifier(config)
         self.scheduler = Scheduler(self.store, self.notifier)
-        self.secret = self.store.secret("session_key").encode()
+        # the password is part of the signing key: changing it logs every session out
+        self.secret = hashlib.sha256((self.store.secret("session_key") + "\0" + (config.password or "")).encode()).digest()
         self.failures: dict[str, list[float]] = {}
         self.lock = threading.Lock()
 
@@ -98,7 +101,28 @@ class App:
 
     def fail(self, ip):
         with self.lock:
+            if len(self.failures) > 5000:          # keep memory bounded under a spray of addresses
+                now = time.time()
+                self.failures = {k: v for k, v in self.failures.items() if v and now - v[-1] < 300}
             self.failures.setdefault(ip, []).append(time.time())
+
+    def host_allowed(self, host: str) -> bool:
+        """Without a password, only answer to IP addresses, localhost and COCHE_ALLOWED_HOSTS: a malicious web
+        page can point its own domain name at this address (DNS rebinding) and would otherwise read the tasks."""
+        if self.protected:
+            return True
+        name = (host or "").strip().lower()
+        if name.startswith("["):
+            name = name[1:].split("]")[0]
+        elif name.count(":") == 1:
+            name = name.rsplit(":", 1)[0]
+        if not name or name == "localhost" or name.endswith(".localhost") or name in self.c.allowed_hosts:
+            return True
+        try:
+            ipaddress.ip_address(name)
+            return True
+        except ValueError:
+            return False
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -129,6 +153,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", cache)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "same-origin")
+        self.send_header("X-Frame-Options", "SAMEORIGIN")
+        self.send_header("Content-Security-Policy", "frame-ancestors 'self'; object-src 'none'; base-uri 'self'")
         if gz:
             self.send_header("Content-Encoding", "gzip")
             self.send_header("Vary", "Accept-Encoding")
@@ -139,6 +165,9 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
     def json(self, status, obj, headers=None):
+        if status >= 400 and (self.headers.get("Content-Length") or "0").strip() != "0" and not getattr(self, "_body_read", False):
+            self.close_connection = True
+            headers = {**(headers or {}), "Connection": "close"}
         if obj is None:
             self.send_response(status)
             self.send_header("Content-Length", "0")
@@ -159,9 +188,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def read_body(self):
         n = int(self.headers.get("Content-Length") or 0)
-        if n > MAX_BODY:
-            raise ValueError("body too large")
+        if n < 0 or n > MAX_BODY:
+            raise ValueError("bad Content-Length")
         raw = self.rfile.read(n) if n else b""
+        self._body_read = True
         if not raw:
             return {}
         ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip()
@@ -227,6 +257,9 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/healthz":
             return self.json(200, {"ok": True, "version": __version__})
+        if not self.app.host_allowed(self.headers.get("Host", "")):
+            log.warning("refused Host %r: add it to COCHE_ALLOWED_HOSTS or set COCHE_PASSWORD", self.headers.get("Host"))
+            return self.json(421, {"error": "unknown host name: add it to COCHE_ALLOWED_HOSTS (or set COCHE_PASSWORD)"})
         if path.startswith("/static/") or path in ("/sw.js", "/manifest.webmanifest", "/favicon.svg"):
             return self.static(path)
         if path == "/login":
@@ -237,7 +270,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.json(200, {"ok": True}, headers={"Set-Cookie": self.session_cookie("", 0)})
         if path == "/calendar.ics":
             key = query.get("key") or ""
-            if not (self.auth() or hmac.compare_digest(key, self.app.store.secret("ics_key"))):
+            if not (self.auth() or hmac.compare_digest(key.encode(), self.app.store.secret("ics_key").encode())):
                 return self.json(401, {"error": "invalid key"})
             return self.send(200, ics.build(self.app.store, self.app.c.title),
                              ctype="text/calendar; charset=utf-8", cache="no-cache")
@@ -247,15 +280,18 @@ class Handler(BaseHTTPRequestHandler):
             if not who:
                 return self.json(401, {"error": "unauthorized"})
             body = {}
+            if method in ("POST", "DELETE") and who in ("session", "open"):
+                # browser-reachable (cookie or no password): refuse what another web site can make the browser
+                # send (CSRF). Forms can't send JSON, and browsers mark cross-site requests with Origin/Sec-Fetch-Site.
+                ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+                if ctype in ("application/x-www-form-urlencoded", "multipart/form-data", "text/plain"):
+                    return self.json(415, {"error": "JSON required"})
+                origin = self.headers.get("Origin")
+                if origin and urllib.parse.urlsplit(origin).netloc != self.headers.get("Host"):
+                    return self.json(403, {"error": "cross-site request refused"})
+                if self.headers.get("Sec-Fetch-Site") == "cross-site":
+                    return self.json(403, {"error": "cross-site request refused"})
             if method in ("POST", "DELETE"):
-                if who == "session":
-                    # cookie auth: refuse cross-site form posts (they can't send JSON)
-                    ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip()
-                    if method == "POST" and ctype != "application/json" and int(self.headers.get("Content-Length") or 0):
-                        return self.json(415, {"error": "JSON required"})
-                    origin = self.headers.get("Origin")
-                    if origin and urllib.parse.urlsplit(origin).netloc != self.headers.get("Host"):
-                        return self.json(403, {"error": "cross-site request refused"})
                 try:
                     body = self.read_body()
                 except (ValueError, UnicodeDecodeError) as e:
@@ -339,7 +375,10 @@ def serve(config: Config):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     if config.password == "change-me":
         raise SystemExit("COCHE_PASSWORD is still 'change-me' (from .env.example): pick your own password in .env.")
+    os.umask(0o077)                     # the database and its WAL files: owner only
     app = App(config)
+    for f in Path(config.data_dir).glob("coche.db*"):
+        f.chmod(0o600)
     app.scheduler.start()
     handler = type("BoundHandler", (Handler,), {"app": app})
     httpd = ThreadingHTTPServer((config.host, config.port), handler)

@@ -249,8 +249,64 @@ class PasswordModeTest(Base):
 
     def test_ics_key(self):
         self.assertEqual(self.c.call("GET", "/calendar.ics")[0], 401)
+        self.assertEqual(self.c.call("GET", "/calendar.ics?key=%C3%A9")[0], 401)     # non-ASCII: 401, not a crash
         key = self.store.secret("ics_key")
         self.assertEqual(self.c.call("GET", "/calendar.ics?key=" + key)[0], 200)
+
+    def test_any_host_name_with_a_password(self):
+        self.assertEqual(self.c.call("GET", "/api/v1/tasks", headers={"Host": "tasks.example.com"})[0], 401)
+
+    def test_password_change_logs_sessions_out(self):
+        self.c.call("POST", "/api/coche/login", {"password": "s3cret"})
+        cookie = self.c.cookie
+        self.httpd.shutdown(); self.httpd.server_close()
+        cfg = Config(host="127.0.0.1", port=0, password="n3w", base_path="/tasks")
+        self.httpd, self.app = make_server(cfg, self.store)
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+        c = Client(f"http://127.0.0.1:{self.httpd.server_address[1]}/tasks")
+        c.cookie = cookie
+        self.assertEqual(c.call("GET", "/api/v1/tasks")[0], 401)
+
+
+class OpenModeSecurityTest(Base):
+    """No password (trusted network): other web sites must still not drive the browser against Coche."""
+
+    def raw(self, method, path, data=b"", headers=None):
+        req = urllib.request.Request(self.c.base + path, data=data or None, method=method, headers=headers or {})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                return r.status, r.headers
+        except urllib.error.HTTPError as e:
+            return e.code, e.headers
+
+    def test_csrf_refused(self):
+        body = b'{"content": "csrf"}'
+        self.assertEqual(self.raw("POST", "/api/v1/tasks", body, {"Content-Type": "text/plain"})[0], 415)
+        self.assertEqual(self.raw("POST", "/api/v1/tasks", b"content=x",
+                                  {"Content-Type": "application/x-www-form-urlencoded"})[0], 415)
+        self.assertEqual(self.c.call("POST", "/api/v1/tasks", {"content": "x"}, {"Origin": "http://evil.example"})[0], 403)
+        self.assertEqual(self.c.call("POST", "/api/v1/tasks", {"content": "x"}, {"Sec-Fetch-Site": "cross-site"})[0], 403)
+        self.assertEqual(self.c.call("GET", "/api/v1/tasks")[1]["results"], [])                       # nothing was created
+        self.assertEqual(self.c.call("POST", "/api/v1/tasks", {"content": "ok"})[0], 200)   # scripts still work
+
+    def test_dns_rebinding_refused(self):
+        self.assertEqual(self.c.call("GET", "/api/v1/tasks", headers={"Host": "evil.example"})[0], 421)
+        self.assertEqual(self.c.call("GET", "/api/v1/tasks", headers={"Host": "192.168.1.20:8043"})[0], 200)
+        self.assertEqual(self.c.call("GET", "/api/v1/tasks", headers={"Host": "[::1]:8043"})[0], 200)
+        self.assertEqual(self.c.call("GET", "/api/v1/tasks", headers={"Host": "localhost"})[0], 200)
+        self.app.c.allowed_hosts = ("coche.lan",)
+        self.assertEqual(self.c.call("GET", "/api/v1/tasks", headers={"Host": "coche.lan:8043"})[0], 200)
+
+    def test_headers_and_bad_length(self):
+        st, h = self.raw("GET", "/api/v1/projects")
+        self.assertEqual(h["X-Frame-Options"], "SAMEORIGIN")
+        self.assertIn("frame-ancestors", h["Content-Security-Policy"])
+        import http.client
+        conn = http.client.HTTPConnection("127.0.0.1", self.httpd.server_address[1], timeout=5)
+        conn.putrequest("POST", "/api/v1/tasks"); conn.putheader("Content-Type", "application/json")
+        conn.putheader("Content-Length", "-1"); conn.endheaders()
+        self.assertEqual(conn.getresponse().status, 400)
+        conn.close()
 
 
 if __name__ == "__main__":

@@ -7,7 +7,8 @@ from .dates import Rule
 
 
 def _esc(s: str) -> str:
-    return (s or "").replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
+    return ((s or "").replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\r\n", "\n")
+            .replace("\r", "\n").replace("\n", "\\n"))
 
 
 def _fold(line: str) -> str:

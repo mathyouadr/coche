@@ -248,6 +248,7 @@ Everything is set with environment variables (or a `.env` file in the working di
 | `COCHE_SERVICE_WORKER` | `1` | Offline app shell (needs HTTPS) |
 | `COCHE_SECURE_COOKIE` | `0` | Mark the session cookie `Secure` (set it behind HTTPS) |
 | `COCHE_TRUST_PROXY` | `0` | Trust `X-Forwarded-For` (login rate limiting behind a proxy) |
+| `COCHE_ALLOWED_HOSTS` | — | Without a password, Coche only answers to IP addresses and `localhost` (protection against DNS rebinding). List the host names you use, comma-separated (`coche.lan,nas.local`) |
 
 Per-user preferences (language, theme, accent colour, date and time format, first day of the week, goals, days off, default reminder) live in **Settings**.
 

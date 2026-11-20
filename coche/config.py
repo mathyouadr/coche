@@ -43,6 +43,7 @@ class Config:
     service_worker: bool = True
     secure_cookie: bool = False         # set when served over HTTPS
     trust_proxy: bool = False           # read X-Forwarded-For for logs / rate limit
+    allowed_hosts: tuple = ()           # extra host names accepted without a password (anti DNS rebinding)
     notify_command: str = ""            # shell command, gets the reminder JSON on stdin
     ntfy_url: str = ""                  # e.g. https://ntfy.sh/my-secret-topic
     webhook_url: str = ""               # POST every task event (Todoist webhook names)
@@ -76,4 +77,5 @@ class Config:
             trust_proxy=_bool(e("COCHE_TRUST_PROXY")), notify_command=e("COCHE_NOTIFY_COMMAND", ""),
             ntfy_url=e("COCHE_NTFY_URL", ""), webhook_url=e("COCHE_WEBHOOK_URL", ""),
             webhook_secret=e("COCHE_WEBHOOK_SECRET", ""),
+            allowed_hosts=tuple(h.strip().lower() for h in e("COCHE_ALLOWED_HOSTS", "").split(",") if h.strip()),
         )
