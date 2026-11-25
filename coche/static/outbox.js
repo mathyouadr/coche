@@ -49,7 +49,8 @@
         if (op.kind === "add" && out && out.id) box.resolve(tempId(op), out.id);
         done++;
       } catch (e) {
-        if (!e || e.offline || !e.status) return { done, failed };
+        // no answer, or the server (or the proxy in front of it) is down / busy: keep everything for later
+        if (!e || e.offline || !e.status || e.status >= 500 || e.status === 429) return { done, failed };
         if (!(GONE.has(e.status) && (op.kind === "close" || op.kind === "reopen"))) failed++; else done++;
         if (op.kind === "add") box.list().filter(o => o.task_id === tempId(op)).forEach(o => box.remove(o.rid));
       }

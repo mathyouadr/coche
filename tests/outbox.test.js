@@ -70,3 +70,13 @@ test("applyLocal: an add shows a pending task, a close removes the task and its 
   O.applyLocal(S, box.push({ kind: "close", task_id: "p" }));
   assert.deepEqual(S.tasks.map(x => x.id).sort(), [tmp.id, "z"].sort());
 });
+
+test("server errors (5xx, 429) keep the queue: the app may be down behind the proxy", async () => {
+  for (const st of [500, 502, 503, 504, 429]) {
+    const box = O.create(mem());
+    box.push({ kind: "close", task_id: "a" }); box.push({ kind: "add", body: { text: "x" } });
+    const res = await O.replay(box, async () => { throw httpErr(st); });
+    assert.deepEqual(res, { done: 0, failed: 0 }, String(st));
+    assert.equal(box.list().length, 2, String(st));
+  }
+});

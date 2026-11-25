@@ -1084,7 +1084,8 @@ const A = {
   logout: run(async () => {
     const n = OUTBOX ? OUTBOX.list().length : 0;
     if (n && !(await confirmBox(t("Log out?"), t("{0} offline changes are not sent yet and will be lost.", n), t("Log out")))) return;
-    await api("POST", "/api/coche/logout", {});
+    try { await api("POST", "/api/coche/logout", {}); }
+    catch (e) { if (e.offline) { toast(t("Offline: log out once the server answers.")); return; } throw e; }
     if (OUTBOX) OUTBOX.clear();
     try { localStorage.removeItem("coche-cache"); } catch (e) { /* ignore */ }
     try { if (window.caches) await caches.delete("coche-data"); } catch (e) { /* ignore */ }

@@ -308,8 +308,8 @@ class Handler(BaseHTTPRequestHandler):
                     if seen:
                         return self.json(*seen)
                     status, out = self.app.api.handle(method, path, query, body)
-                    if status < 400:
-                        self.app.store.request_put(rid, status, out)
+                    if status < 400 and not path.startswith(("/api/coche/tokens", "/api/coche/login")):
+                        self.app.store.request_put(rid, status, out)   # never keep a secret (new token) in the table
                 return self.json(status, out)
             status, out = self.app.api.handle(method, path, query, body)
             return self.json(status, out)

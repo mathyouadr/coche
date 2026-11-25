@@ -1,5 +1,6 @@
 /* French translations. Keys are the English strings used in app.js; add a language by copying this file. */
 window.COCHE_FR = {
+"Offline: log out once the server answers.": "Hors ligne : déconnecte-toi quand le serveur répond.",
 "Offline: only completing and adding tasks work for now": "Hors ligne : seulement cocher et ajouter pour l'instant",
 "Syncing…": "Synchronisation…",
 "{0} waiting to sync": "{0} en attente",

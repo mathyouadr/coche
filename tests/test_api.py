@@ -349,6 +349,11 @@ class RequestIdTest(Base):
         self.assertGreaterEqual(st1, 400)
         self.assertIsNone(self.store.request_get("bad-1"))
 
+    def test_request_id_token_not_stored(self):
+        st, tok = self.c.call("POST", "/api/coche/tokens", {"name": "x"}, headers={"X-Request-Id": "tok-1"})
+        self.assertLess(st, 400)
+        self.assertIsNone(self.store.request_get("tok-1"))
+
     def test_request_id_purge(self):
         self.store.request_put("old", 200, {"ok": 1})
         self.store.x("UPDATE requests SET at=? WHERE id='old'", ((NOW - dt.timedelta(days=31)).isoformat(),))
