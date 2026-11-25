@@ -139,7 +139,7 @@ async function load(quiet) {
     const b = await api("GET", "/api/coche/bootstrap");
     Object.assign(S, b); reindex(); applySettings();
     try { localStorage.setItem("coche-cache", JSON.stringify(b)); } catch (e) { /* quota */ }
-    overlay();
+    overlay(); banner();   // the banner text follows the language just read from the settings
     render(quiet);
   } catch (e) { if (!quiet) toast(e.message); }
 }

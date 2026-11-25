@@ -30,7 +30,7 @@ function netOrCache(e, cacheName, key, onFresh) {
     let done = false;
     const fallback = async () => {
       if (done) return false;
-      const hit = await caches.open(cacheName).then(c => c.match(key));
+      const hit = await caches.open(cacheName).then(c => c.match(key)) || await caches.match(key);   // any cache of this site
       if (done || !hit) return false;
       done = true; resolve(hit); return true;
     };
@@ -43,6 +43,12 @@ function netOrCache(e, cacheName, key, onFresh) {
 self.addEventListener("fetch", e => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET" || url.origin !== location.origin) return;
+  if (!url.pathname.startsWith(BASE + "/")) {
+    // files the host page injects (COCHE_EXTRA_HEAD/BODY: its menu script, styles, fonts): network, else a copy
+    if (["script", "style", "font", "image"].includes(e.request.destination))
+      e.respondWith(netOrCache(e, DATA, url.pathname + url.search, res => caches.open(DATA).then(c => c.put(url.pathname + url.search, res))));
+    return;
+  }
   if (url.pathname === BOOT) {
     e.respondWith(netOrCache(e, DATA, BOOT, res => caches.open(DATA).then(c => c.put(BOOT, stamp(res)))));
     return;
