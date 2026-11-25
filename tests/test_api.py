@@ -358,5 +358,21 @@ class RequestIdTest(Base):
         self.assertEqual(self.store.request_get("new"), (200, {"ok": 2}))
 
 
+class ServiceWorkerTest(Base):
+    def test_sw_served_with_outbox_in_shell(self):
+        st, body = self.c.call("GET", "/sw.js")
+        self.assertEqual(st, 200)
+        self.assertIn(b"outbox.js?v=", body)
+        self.assertNotIn(b"{{VERSION}}", body)
+
+
+class ServiceWorkerOffTest(Base):
+    config = {"service_worker": False}
+
+    def test_sw_disabled_404(self):
+        st, _ = self.c.call("GET", "/sw.js")
+        self.assertEqual(st, 404)
+
+
 if __name__ == "__main__":
     unittest.main()

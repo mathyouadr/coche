@@ -84,20 +84,54 @@ const projName = p => p && p.is_inbox_project ? t("Inbox") : (p ? p.name : "");
 
 /* ------------------------------------------------------------------ api */
 let offline = false;
-async function api(method, path, body) {
+const API_TIMEOUT = 10000;   // no answer in 10 s = offline (a weak network would otherwise hang the action)
+/* rid: X-Request-Id, so the same action sent again (offline queue) runs once on the server. Errors carry
+   .offline (no answer) or .status (HTTP error). An answer served from the service worker's cache = offline. */
+async function api(method, path, body, rid) {
   const opt = { method, headers: {}, credentials: "same-origin" };
   if (body !== undefined) { opt.headers["Content-Type"] = "application/json"; opt.body = JSON.stringify(body); }
+  if (rid) opt.headers["X-Request-Id"] = rid;
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), API_TIMEOUT); opt.signal = ctl.signal;
   let r;
   try { r = await fetch(BASE + path, opt); }
-  catch (e) { setOffline(true); throw new Error(t("You are offline")); }
-  setOffline(false);
+  catch (e) { setOffline(true); throw Object.assign(new Error(t("Offline: only completing and adding tasks work for now")), { offline: true }); }
+  finally { clearTimeout(timer); }
+  const cached = !!r.headers.get("X-Cached-At");
+  setOffline(cached);
   if (r.status === 401 && BOOT.protected) { location.href = BASE + "/login"; throw new Error("unauthorized"); }
+  if (!cached && OUTBOX && OUTBOX.list().length && !SYNCING) setTimeout(syncOutbox, 0);
   if (r.status === 204) return null;
   const data = await r.json().catch(() => null);
-  if (!r.ok) throw new Error((data && data.error) || ("HTTP " + r.status));
+  if (!r.ok) throw Object.assign(new Error((data && data.error) || ("HTTP " + r.status)), { status: r.status });
   return data;
 }
-function setOffline(v) { if (v === offline) return; offline = v; const b = $("#c-offline"); if (b) b.hidden = !v; }
+function setOffline(v) { offline = v; banner(); }
+function banner() {
+  const b = $("#c-offline"); if (!b) return;
+  const n = OUTBOX ? OUTBOX.list().length : 0;
+  b.hidden = !offline && !n;
+  b.textContent = (offline ? t("Offline: showing your last synced tasks") : t("Syncing…")) + (n ? " · " + t("{0} waiting to sync", n) : "");
+}
+
+/* ------------------------------------------------------------------ offline queue (outbox.js) */
+const OUTBOX = window.CocheOutbox ? window.CocheOutbox.create(localStorage) : null;
+let SYNCING = false;
+function overlay() { if (OUTBOX) { for (const op of OUTBOX.list()) CocheOutbox.applyLocal(S, op); reindex(); } }
+function rebuild() {   // server state from the local copy + what is still queued
+  try { const c = JSON.parse(localStorage.getItem("coche-cache") || "null"); if (c) Object.assign(S, c); } catch (e) { /* bad cache */ }
+  reindex(); overlay(); render();
+}
+async function syncOutbox() {
+  if (!OUTBOX || SYNCING || !OUTBOX.list().length) return;
+  SYNCING = true; banner();
+  let res;
+  try { res = await CocheOutbox.replay(OUTBOX, (m, p, b, rid) => api(m, p, b, rid)); }
+  finally { SYNCING = false; }
+  banner();
+  if (res.done || res.failed) await load(true);
+  if (res.failed) toast(t("{0} offline changes could not be saved", res.failed));
+}
+function queueOffline(op) { const o = OUTBOX.push(op); CocheOutbox.applyLocal(S, o); reindex(); banner(); return o; }
 const run = fn => async (...a) => { try { return await fn(...a); } catch (e) { toast(e.message || String(e)); } };
 
 async function load(quiet) {
@@ -105,6 +139,7 @@ async function load(quiet) {
     const b = await api("GET", "/api/coche/bootstrap");
     Object.assign(S, b); reindex(); applySettings();
     try { localStorage.setItem("coche-cache", JSON.stringify(b)); } catch (e) { /* quota */ }
+    overlay();
     render(quiet);
   } catch (e) { if (!quiet) toast(e.message); }
 }
@@ -208,6 +243,7 @@ function taskHTML(x, ctx = {}) {
   const di = ctx.done ? null : dueInfo(x, ctx.onlyTime);
   const proj = projById.get(x.project_id), sec = secById.get(x.section_id);
   const meta = [];
+  if (x.pending) meta.push(`<span class="pending" title="${esc(t("Waiting to sync"))}">⏳ ${esc(t("Waiting to sync"))}</span>`);
   if (di && di.text) meta.push(`<span class="${di.cls}">${ic(x.due.is_recurring ? "repeat" : "cal", "xs")}${esc(di.text)}</span>`);
   else if (x.due && x.due.is_recurring) meta.push(`<span>${ic("repeat", "xs")}</span>`);
   if (x.deadline) { const n = dayDiff(x.deadline.date); meta.push(`<span class="${n < 0 ? "due-over" : n <= 2 ? "due-tom" : ""}" title="${esc(t("Deadline"))}">${ic("target", "xs")}${esc(dayLabel(x.deadline.date))}</span>`); }
@@ -742,7 +778,11 @@ const complete = run(async (id, li) => {
   if (li) li.classList.add("closing");
   sound(); navigator.vibrate && navigator.vibrate(8);
   await sleep(330);
-  const res = await api("POST", `/api/coche/tasks/${id}/close`).catch(e => { if (li) li.classList.remove("closing"); throw e; });
+  const rid = OUTBOX && CocheOutbox.newRid();
+  if (OUTBOX && CocheOutbox.isTemp(id)) return closeOffline(id, rid);   // added offline, not on the server yet
+  let res;
+  try { res = await api("POST", `/api/coche/tasks/${id}/close`, undefined, rid); }
+  catch (e) { if (e.offline && OUTBOX) return closeOffline(id, rid); if (li) li.classList.remove("closing"); throw e; }
   S.stats.today = (S.stats.today || 0) + 1; S.stats.week = (S.stats.week || 0) + 1; ACTIVITY = null;
   if (res.recurring) {
     put(res.task); render();
@@ -754,6 +794,12 @@ const complete = run(async (id, li) => {
   }
   setTimeout(() => api("GET", "/api/coche/stats").then(s => { S.stats = s; if (R.view === "today" || R.view === "completed") renderView(); }).catch(() => {}), 800);
 });
+function closeOffline(id, rid) {
+  const op = queueOffline({ rid, kind: "close", task_id: id });
+  if (DETAIL === id) closeDetail();
+  render();
+  toast(t("Completed offline, sent when back online"), () => { if (OUTBOX.cancel(op.rid)) rebuild(); banner(); });
+}
 const removeTask = run(async id => {
   const x = byId.get(id); if (!x) return;
   const n = countDeep(id);
@@ -857,7 +903,20 @@ const qaSubmit = run(async () => {
     parent_id: M.parent_id || undefined, priority: M.priority || undefined, labels: M.labels };
   if (M.due && !(P.due && P.due.date)) { if (M.due.due_string) body.due_string = M.due.due_string; else { body.due_date = M.due.due_date; body.due_time = M.due.due_time || undefined; } }
   $("#qa-submit").disabled = true;
-  const x = await api("POST", "/api/v1/tasks/quick", body);
+  const rid = OUTBOX && CocheOutbox.newRid();
+  let x;
+  try { x = await api("POST", "/api/v1/tasks/quick", body, rid); }
+  catch (e) {
+    if (!e.offline || !OUTBOX) { $("#qa-submit").disabled = false; throw e; }
+    // Offline: kept as typed (the server reads dates and #projects when it gets it), shown with ⏳.
+    const op = queueOffline({ rid, kind: "add", body });
+    for (const r of M.reminders) OUTBOX.push({ kind: "reminder", task_id: CocheOutbox.tempId(op), body: r });
+    $("#qa-input").value = ""; $("#qa-desc").value = ""; $("#qa-hl").innerHTML = ""; QA.parsed = null; M.reminders = []; M.priority = null;
+    $("#qa-input").style.height = "auto"; $("#qa-submit").disabled = false; $("#qa-input").focus();
+    renderQAChips(); render(); banner();
+    toast(t("Saved offline, sent when back online"));
+    return;
+  }
   for (const r of M.reminders) await api("POST", "/api/coche/reminders", { task_id: x.id, ...r });
   put(x);
   S.reminders = (await api("GET", "/api/coche/reminders")) || S.reminders;
@@ -871,6 +930,7 @@ const qaSubmit = run(async () => {
 /* ------------------------------------------------------------------ detail panel */
 let DETAIL = null, COMMENTS = {};
 function openDetail(id) {
+  if (OUTBOX && CocheOutbox.isTemp(id)) { toast(t("Waiting to sync: you can edit it once it is on the server.")); return; }
   if (!byId.has(id)) { toast(t("This task is completed or was deleted.")); return; }
   const was = DETAIL; DETAIL = id; SEL = id;
   document.body.classList.add("detail-open");
@@ -1021,7 +1081,15 @@ const A = {
   "token-add": run(async () => { const r = await formBox(t("New API token"), [{ name: "name", label: t("Name (e.g. the script that uses it)"), required: true }], t("Create")); if (!r || !r.name) return; const tok = await api("POST", "/api/coche/tokens", { name: r.name }); await modal(`<h3>${t("Your new token")}</h3><p class="hint">${t("Copy it now: it won't be shown again.")}</p><div class="code">${esc(tok.token)}</div><div class="acts"><button class="btn primary" data-r>${t("Done")}</button></div>`, (el, done) => el.addEventListener("click", e => e.target.closest("[data-r]") && done())); loadTokens(); }),
   "token-del": run(async el => { if (await confirmBox(t("Revoke token?"), t("Scripts using it will stop working."), t("Revoke"))) { await api("DELETE", `/api/coche/tokens/${el.dataset.id}`); loadTokens(); } }),
   shortcuts: () => showShortcuts(),
-  logout: run(async () => { await api("POST", "/api/coche/logout", {}); location.href = BASE + "/login"; }),
+  logout: run(async () => {
+    const n = OUTBOX ? OUTBOX.list().length : 0;
+    if (n && !(await confirmBox(t("Log out?"), t("{0} offline changes are not sent yet and will be lost.", n), t("Log out")))) return;
+    await api("POST", "/api/coche/logout", {});
+    if (OUTBOX) OUTBOX.clear();
+    try { localStorage.removeItem("coche-cache"); } catch (e) { /* ignore */ }
+    try { if (window.caches) await caches.delete("coche-data"); } catch (e) { /* ignore */ }
+    location.href = BASE + "/login";
+  }),
 };
 let noClickUntil = 0;
 document.addEventListener("click", e => {
@@ -1279,7 +1347,9 @@ document.head.append(style);
 
 function boot() {
   try { const c = JSON.parse(localStorage.getItem("coche-cache") || "null"); if (c) { Object.assign(S, c); reindex(); applySettings(); } } catch (e) { /* bad cache */ }
-  shell();
+  overlay();
+  shell(); banner();
+  addEventListener("online", () => { load(true); });
   R = parseRoute();
   if (S.tasks.length || S.projects.length) render();
   load().then(() => {

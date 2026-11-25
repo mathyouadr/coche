@@ -345,6 +345,8 @@ class Handler(BaseHTTPRequestHandler):
                  "shortcuts": [{"name": "Today", "url": f"{c.base_path}/today"},
                                {"name": "Add a task", "url": f"{c.base_path}/today?add=1"}]}
             return self.send(200, json.dumps(m), ctype="application/manifest+json", cache="no-cache")
+        if path == "/sw.js" and not c.service_worker:
+            return self.json(404, {"error": "service worker disabled"})   # a 404 also unregisters an old one
         name = {"/sw.js": "sw.js", "/favicon.svg": "icon.svg"}.get(path, path[len("/static/"):])
         f = (STATIC / name).resolve()
         if not str(f).startswith(str(STATIC.resolve())) or not f.is_file():

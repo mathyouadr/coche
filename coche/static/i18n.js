@@ -1,5 +1,15 @@
 /* French translations. Keys are the English strings used in app.js; add a language by copying this file. */
 window.COCHE_FR = {
+"Offline: only completing and adding tasks work for now": "Hors ligne : seulement cocher et ajouter pour l'instant",
+"Syncing…": "Synchronisation…",
+"{0} waiting to sync": "{0} en attente",
+"{0} offline changes could not be saved": "{0} modifications hors ligne n'ont pas pu être enregistrées",
+"Completed offline, sent when back online": "Cochée hors ligne, envoyée au retour du réseau",
+"Saved offline, sent when back online": "Enregistrée hors ligne, envoyée au retour du réseau",
+"Log out?": "Se déconnecter ?",
+"{0} offline changes are not sent yet and will be lost.": "{0} modifications hors ligne ne sont pas encore envoyées et seront perdues.",
+"Waiting to sync: you can edit it once it is on the server.": "En attente de synchro : modifiable une fois sur le serveur.",
+"Waiting to sync": "En attente",
 "(No section)": "(Sans section)",
 "API & integrations": "API et intégrations",
 "Accent colour": "Couleur d'accent",
