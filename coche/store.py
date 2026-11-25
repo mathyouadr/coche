@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS activity (
 CREATE INDEX IF NOT EXISTS activity_at ON activity(at);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS tokens (id TEXT PRIMARY KEY, name TEXT, hash TEXT UNIQUE, added_at TEXT, last_used_at TEXT);
+CREATE TABLE IF NOT EXISTS requests (id TEXT PRIMARY KEY, status INTEGER NOT NULL, body TEXT, at TEXT NOT NULL);
 """
 
 
@@ -110,6 +111,19 @@ class Store:
             if not self.db.execute("SELECT 1 FROM projects WHERE is_inbox_project=1 AND is_deleted=0").fetchone():
                 self.db.execute("INSERT INTO projects(id,name,color,is_inbox_project,child_order,added_at,updated_at)"
                                 " VALUES(?,?,?,?,?,?,?)", (new_id(), "Inbox", "charcoal", 1, -1, utcnow(), utcnow()))
+
+    # ------------------------------------------------------------------ idempotent requests (X-Request-Id)
+    def request_get(self, rid):
+        """(status, body) of a request already answered with this id, or None."""
+        row = self.q1("SELECT status, body FROM requests WHERE id=?", (rid,))
+        return (row["status"], json.loads(row["body"]) if row["body"] else None) if row else None
+
+    def request_put(self, rid, status, body):
+        self.x("INSERT OR REPLACE INTO requests(id,status,body,at) VALUES(?,?,?,?)",
+               (rid, status, json.dumps(body), self.now().isoformat()))
+
+    def requests_purge(self, days=30):
+        self.x("DELETE FROM requests WHERE at < ?", ((self.now() - dt.timedelta(days=days)).isoformat(),))
 
     # ------------------------------------------------------------------ time
     def now(self) -> dt.datetime:

@@ -309,5 +309,54 @@ class OpenModeSecurityTest(Base):
         conn.close()
 
 
+class RequestIdTest(Base):
+    """X-Request-Id: a POST replayed by an offline queue (answer lost, server did it) runs only once."""
+    H = {"X-Request-Id": "op-123_abc"}
+
+    def test_request_id_quick_add_once(self):
+        st1, t1 = self.c.call("POST", "/api/v1/tasks/quick", {"text": "Acheter du pain"}, headers=self.H)
+        st2, t2 = self.c.call("POST", "/api/v1/tasks/quick", {"text": "Acheter du pain"}, headers=self.H)
+        self.assertEqual((st1, st2), (200, 200))
+        self.assertEqual(t1, t2)
+        _, tasks = self.c.call("GET", "/api/v1/tasks")
+        self.assertEqual(sum(1 for x in tasks["results"] if x["content"] == "Acheter du pain"), 1)
+
+    def test_request_id_close_once(self):
+        _, t = self.c.call("POST", "/api/v1/tasks/quick", {"text": "Tous les jours arroser every day"})
+        h = {"X-Request-Id": "close-1"}
+        st1, r1 = self.c.call("POST", f"/api/coche/tasks/{t['id']}/close", {}, headers=h)
+        st2, r2 = self.c.call("POST", f"/api/coche/tasks/{t['id']}/close", {}, headers=h)
+        self.assertEqual((st1, r1), (st2, r2))
+        _, done = self.c.call("GET", "/api/coche/activity?event_type=completed&limit=50")
+        self.assertEqual(len(done["events"] if isinstance(done, dict) and "events" in done else done), 1)
+
+    def test_request_id_other_ids_run(self):
+        self.c.call("POST", "/api/v1/tasks/quick", {"text": "A"}, headers={"X-Request-Id": "a1"})
+        self.c.call("POST", "/api/v1/tasks/quick", {"text": "A"}, headers={"X-Request-Id": "a2"})
+        _, tasks = self.c.call("GET", "/api/v1/tasks")
+        self.assertEqual(sum(1 for x in tasks["results"] if x["content"] == "A"), 2)
+
+    def test_request_id_invalid_ignored(self):
+        h = {"X-Request-Id": "x" * 200}
+        self.c.call("POST", "/api/v1/tasks/quick", {"text": "B"}, headers=h)
+        self.c.call("POST", "/api/v1/tasks/quick", {"text": "B"}, headers=h)
+        _, tasks = self.c.call("GET", "/api/v1/tasks")
+        self.assertEqual(sum(1 for x in tasks["results"] if x["content"] == "B"), 2)
+
+    def test_request_id_errors_not_remembered(self):
+        h = {"X-Request-Id": "bad-1"}
+        st1, _ = self.c.call("POST", "/api/coche/tasks/nope/close", {}, headers=h)
+        self.assertGreaterEqual(st1, 400)
+        self.assertIsNone(self.store.request_get("bad-1"))
+
+    def test_request_id_purge(self):
+        self.store.request_put("old", 200, {"ok": 1})
+        self.store.x("UPDATE requests SET at=? WHERE id='old'", ((NOW - dt.timedelta(days=31)).isoformat(),))
+        self.store.request_put("new", 200, {"ok": 2})
+        self.store.requests_purge(days=30)
+        self.assertIsNone(self.store.request_get("old"))
+        self.assertEqual(self.store.request_get("new"), (200, {"ok": 2}))
+
+
 if __name__ == "__main__":
     unittest.main()

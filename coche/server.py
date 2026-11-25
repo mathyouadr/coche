@@ -8,6 +8,7 @@ import hmac
 import html
 import ipaddress
 import os
+import re
 import json
 import logging
 import mimetypes
@@ -26,6 +27,7 @@ from .reminders import Notifier, Scheduler
 from .store import Store
 
 log = logging.getLogger("coche")
+REQUEST_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 STATIC = Path(__file__).parent / "static"
 MAX_BODY = 8 * 1024 * 1024
 SESSION_DAYS = 90
@@ -58,6 +60,8 @@ class App:
                                      "date_order": "MDY" if us else "DMY",
                                      "time_format": "12h" if us else "24h"})
         self.api = API(self.store, self)
+        self.store.requests_purge(days=30)
+        self.request_lock = threading.Lock()     # one X-Request-Id at a time: a replay waits for the original
         self.notifier = Notifier(config)
         self.scheduler = Scheduler(self.store, self.notifier)
         # the password is part of the signing key: changing it logs every session out
@@ -296,6 +300,17 @@ class Handler(BaseHTTPRequestHandler):
                     body = self.read_body()
                 except (ValueError, UnicodeDecodeError) as e:
                     return self.json(400, {"error": f"invalid body ({e})"})
+            rid = self.headers.get("X-Request-Id") or ""
+            if method == "POST" and REQUEST_ID.fullmatch(rid):
+                # Idempotent replay (offline queues): same id = same answer, the action runs once (ids kept 30 days).
+                with self.app.request_lock:
+                    seen = self.app.store.request_get(rid)
+                    if seen:
+                        return self.json(*seen)
+                    status, out = self.app.api.handle(method, path, query, body)
+                    if status < 400:
+                        self.app.store.request_put(rid, status, out)
+                return self.json(status, out)
             status, out = self.app.api.handle(method, path, query, body)
             return self.json(status, out)
 

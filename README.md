@@ -201,6 +201,8 @@ curl -H "Authorization: Bearer $COCHE_TOKEN" \
 
 **Authentication.** Without `COCHE_PASSWORD`, the API is open (fine on a trusted network or behind your reverse proxy's authentication). With a password, the API needs a token: create one in **Settings › API & integrations** or with `coche token create my-script`. Tokens are stored hashed.
 
+**Safe retries.** Send `X-Request-Id: <1-64 letters, digits, - or _>` with a POST: if the same id comes again (a retry after a lost answer, an offline queue), Coche answers with the first result instead of running it twice. Ids are kept 30 days. Same idea as Todoist's header.
+
 **Webhooks.** Set `COCHE_WEBHOOK_URL` to receive `item:added`, `item:updated`, `item:completed`, `item:uncompleted`, `item:deleted` and `reminder:fired`, in Todoist's webhook format. Set `COCHE_WEBHOOK_SECRET` to get an `X-Coche-Hmac-SHA256` signature of the body.
 
 ## 📅 Calendar feed
